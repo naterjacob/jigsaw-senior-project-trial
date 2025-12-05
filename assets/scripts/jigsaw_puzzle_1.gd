@@ -47,12 +47,16 @@ func _ready():
 	selected_puzzle_name = PuzzleVar.choice["base_name"] + str(PuzzleVar.choice["size"])
 	is_muted = false
 	
-	if NetworkManager.is_online:
-		NetworkManager.player_joined.connect(_on_player_joined)
-		NetworkManager.player_left.connect(_on_player_left)
-		NetworkManager.chat_message_received.connect(append_chat_message)
-		create_floating_player_display()
-		create_chat_window()
+  if NetworkManager.is_online:
+        # Connect to network signals
+        NetworkManager.player_joined.connect(_on_player_joined)
+        NetworkManager.player_left.connect(_on_player_left)
+        #back_button.pressed.connect(_on_back_pressed)
+        # Create online status label
+        create_floating_player_display()
+        for player_id in NetworkManager.connected_players.keys():
+                var player_name = NetworkManager.connected_players[player_id]
+                _on_player_joined(player_id, player_name)
 	
 	# load up reference image
 	var ref_image = PuzzleVar.choice["file_path"]
