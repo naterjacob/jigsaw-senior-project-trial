@@ -1,117 +1,150 @@
 extends Camera2D
 
-var zoom_speed = 100
-var zoom_margin = 0.3
+# -------- Zoom settings --------
+var zoom_speed: float = 8.0
+var zoom_min: float = 0.2
+var zoom_max: float = 2.0
+var zoom_factor: float = 1.0
 
-var zoom_min = 0.2
-var zoom_max = 2
+# -------- Panning state --------
+var is_panning: bool = false
+var last_mouse_position: Vector2 = Vector2.ZERO
 
-var zoom_pos = Vector2()
-var zoom_factor = 1.0
+# -------- Camera movement bounds --------
+var camera_bounds: Rect2 = Rect2(Vector2(-3700, -2700), Vector2(6000, 4100))
 
-var is_panning = false
-var last_mouse_position = Vector2()
+# -------- Reference / preview image --------
+var reference_image_path: String = PuzzleVar.choice["file_path"]
+var reference_texture: Texture2D = load(reference_image_path)
+var preview_image: TextureRect    # the small finished-puzzle preview
 
-# Bounds for constraining movement to background
-var camera_bounds = Rect2(Vector2(-3700, -2700), Vector2(6000, 4100))
 
-# Reference image path and texture loading
-var reference_image_path = PuzzleVar.choice["file_path"]
-var reference_texture = load(reference_image_path) 
-
-# Called when the node enters the scene tree for the first time.
-func _ready():
-	#position_smoothing_enabled = true
+func _ready() -> void:
+	make_current()
 	limit_smoothed = true
-	# Add the CanvasLayer or Control node dynamically (if not already in the scene)
-	var canvas_layer = CanvasLayer.new()
+
+	# ---- Create a small preview image in a CanvasLayer ----
+	var canvas_layer := CanvasLayer.new()
 	add_child(canvas_layer)
 
-	# Create a TextureRect for the reference image
-	var reference_image = TextureRect.new()
-	reference_image.texture = load(reference_image_path) # Dynamically load the image
-	reference_image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT # Keep aspect ratio
-	var texture_size = reference_image.texture.get_size()
+	preview_image = TextureRect.new()
+	preview_image.texture = reference_texture
+	preview_image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT
 
-	
-	# Define the target size (in pixels) that you want all images to be
-	var target_size = Vector2(400, 400)  # Example target size: 200x200 pixels
+	# Target size for the preview
+	var texture_size: Vector2 = reference_texture.get_size()
+	var target_size: Vector2 = Vector2(400.0, 400.0)
+	var scale_x: float = target_size.x / texture_size.x
+	var scale_y: float = target_size.y / texture_size.y
+	var uniform_scale: float = min(scale_x, scale_y)
 
-	# Calculate the scale factors to make the image fit the target size
-	var scale_x = target_size.x / texture_size.x
-	var scale_y = target_size.y / texture_size.y
+	preview_image.scale = Vector2(uniform_scale, uniform_scale)
 
-	# Use the smaller scale factor to maintain aspect ratio
-	var uniform_scale = min(scale_x, scale_y)
-	#var desired_width = texture_size.x * 0.001# Adjust as needed
-	#var desired_height = texture_size.y * 0.001# Adjust as needed
-	reference_image.set_scale(Vector2(uniform_scale, uniform_scale))
-	# Add the TextureRect to the CanvasLayer
-	canvas_layer.add_child(reference_image)
+	# Put it in the top-left corner with a little margin
+	preview_image.position = Vector2(20.0, 20.0)
 
-# Called every frame. 'delta' is the elapsed time since the previous frame.
-func _process(delta):
-	zoom.x = lerp(zoom.x, zoom.x * zoom_factor, zoom_speed * delta)
-	zoom.y = lerp(zoom.y, zoom.y * zoom_factor, zoom_speed * delta)
+	canvas_layer.add_child(preview_image)
 
+
+func _process(delta: float) -> void:
+	# Smooth zoom towards zoom_factor
+	var target_zoom: Vector2 = Vector2(zoom_factor, zoom_factor)
+	zoom = zoom.lerp(target_zoom, zoom_speed * delta)
+
+	# Clamp zoom
 	zoom.x = clamp(zoom.x, zoom_min, zoom_max)
 	zoom.y = clamp(zoom.y, zoom_min, zoom_max)
-	
-	#print(zoom_factor)
 
-func _input(event):
-	if abs(zoom_pos.x - get_global_mouse_position().x) > zoom_margin:
-		zoom_factor = 1.0
-	if abs(zoom_pos.y - get_global_mouse_position().y) > zoom_margin:
-		zoom_factor = 1.0
-		
-	if event is InputEventKey:
-		if event.is_pressed():
-			# Check if both J and K are pressed
-			if Input.is_key_pressed(KEY_J) and Input.is_key_pressed(KEY_K):
-				return  # Skip zoom functionality when both are pressed
-				
-			if event.keycode == KEY_J && zoom_factor > 0.99:
-				if (zoom_factor == 1.01):
-					zoom_factor -= 0.02
-				else:
-					zoom_factor -= 0.01
-					
-				# Adjust camera position to keep the mouse world position consistent
-				#position = get_global_mouse_position()
-	
-			if event.keycode == KEY_K && zoom_factor < 1.01:
-				if (zoom_factor == 0.99):
-					zoom_factor += 0.02
-				else:
-					zoom_factor += 0.01
-				
-				#position = get_global_mouse_position()
-				
-	##panning test
-	#if event is InputEventMouseButton:
-		#if event.button_index == MOUSE_BUTTON_LEFT:
-			#if event.is_pressed() and PuzzleVar.background_clicked == true:
-				## Start panning
-				#is_panning = true
-				#last_mouse_position = event.position
-			#else:
-				## Stop panning
-				#is_panning = false
-	##elif event is InputEventMouseMotion and is_panning: # if currently panning
-	#elif event is InputEventMouseMotion and PuzzleVar.background_clicked == true: # if currently panning
-		#var mouse_delta = event.position - last_mouse_position
-		#position -= mouse_delta / zoom # move the camera position based on how zoomed in
-		#last_mouse_position = event.position # set the last mouse position
 
-	#elif event is InputEventMouseMotion and is_panning: # if currently panning
+func _input(event: InputEvent) -> void:
+	# ---------- Mouse wheel zoom (all platforms) ----------
+	if event is InputEventMouseButton:
+		var mb := event as InputEventMouseButton
+
+		if mb.button_index == MOUSE_BUTTON_WHEEL_UP:
+			# zoom in -> smaller zoom_factor
+			zoom_factor *= 0.9
+		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			# zoom out -> larger zoom_factor
+			zoom_factor *= 1.1
+
+		zoom_factor = clamp(zoom_factor, zoom_min, zoom_max)
+
+	# ---------- Trackpad pinch zoom (Magnify gesture) ----------
+	if event is InputEventMagnifyGesture:
+		var mg := event as InputEventMagnifyGesture
+		var sensitivity: float = 0.4
+		var f: float = mg.factor
+
+		# On mac: your current behavior is correct:
+		#   f > 1 → fingers apart (pinch OUT) → zoom IN
+		#   f < 1 → fingers together (pinch IN) → zoom OUT
+		#
+		# On some non-Mac laptops the factor behaves opposite,
+		# so we invert the mapping there.
+
+		if OS.get_name() == "macOS":
+			if f > 1.0:
+				# zoom in → make zoom_factor smaller
+				var amount_in: float = (f - 1.0) * sensitivity
+				zoom_factor *= (1.0 - amount_in)
+			elif f < 1.0:
+				# zoom out → make zoom_factor bigger
+				var amount_out: float = (1.0 - f) * sensitivity
+				zoom_factor *= (1.0 + amount_out)
+		else:
+			# Invert logic for non-macOS so the *physical gesture*
+			# still feels the same:
+			# pinch OUT (f > 1) → zoom IN
+			# pinch IN  (f < 1) → zoom OUT
+			if f > 1.0:
+				# treat this as zoom IN → make zoom_factor smaller
+				var amount_in2: float = (f - 1.0) * sensitivity
+				zoom_factor *= (1.0 - amount_in2)
+			elif f < 1.0:
+				# treat this as zoom OUT → make zoom_factor bigger
+				var amount_out2: float = (1.0 - f) * sensitivity
+				zoom_factor *= (1.0 + amount_out2)
+
+		zoom_factor = clamp(zoom_factor, zoom_min, zoom_max)
+
+	# ---------- Panning when background is clicked ----------
 	if event is InputEventMouseMotion:
-		if PuzzleVar.background_clicked == true: # if currently panning
-			var mouse_delta = event.position - last_mouse_position
-			position -= mouse_delta / zoom # move the camera position based on how zoomed in
-			
-			# Clamp the camera position within the bounds
-			position.x = clamp(position.x, camera_bounds.position.x, camera_bounds.position.x + camera_bounds.size.x)
-			position.y = clamp(position.y, camera_bounds.position.y, camera_bounds.position.y + camera_bounds.size.y)
-			
-		last_mouse_position = event.position # set the last mouse position
+		var mm := event as InputEventMouseMotion
+
+		if PuzzleVar.background_clicked:
+			var mouse_delta: Vector2 = mm.position - last_mouse_position
+			position -= mouse_delta / zoom
+
+			# Clamp to camera bounds
+			position.x = clamp(
+				position.x,
+				camera_bounds.position.x,
+				camera_bounds.position.x + camera_bounds.size.x
+			)
+			position.y = clamp(
+				position.y,
+				camera_bounds.position.y,
+				camera_bounds.position.y + camera_bounds.size.y
+			)
+
+		last_mouse_position = mm.position
+
+
+# =========================================================
+# Public helpers for UI buttons (called by ui_button.gd)
+# =========================================================
+
+func zoom_in() -> void:
+	# Smaller zoom_factor = closer / zoom in
+	zoom_factor = max(zoom_min, zoom_factor * 0.9)
+
+
+func zoom_out() -> void:
+	# Larger zoom_factor = farther / zoom out
+	zoom_factor = min(zoom_max, zoom_factor * 1.1)
+
+
+func set_preview_visible(visible: bool) -> void:
+	if preview_image != null and is_instance_valid(preview_image):
+		preview_image.visible = visible

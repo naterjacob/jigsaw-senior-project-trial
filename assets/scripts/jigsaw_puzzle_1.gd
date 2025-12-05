@@ -15,8 +15,19 @@ var selected_puzzle_dir = ""
 var selected_puzzle_name = ""
 
 # --- UI Element Variables ---
+var piece_count_label: Label
 var floating_status_box: PanelContainer
 var online_status_label: Label
+var chat_panel: PanelContainer
+var chat_content_container: VBoxContainer
+var chat_messages_label: RichTextLabel
+var chat_input: LineEdit
+var chat_send_button: Button
+var chat_toggle_button: Button
+var chat_input_row: HBoxContainer
+var chat_minimized := false
+var chat_expanded_height := 200.0
+var chat_bottom_offset := -120.0
 
 # --- Network Data ---
 var connected_players = [] # Array to store connected player names (excluding self)
@@ -36,16 +47,16 @@ func _ready():
 	selected_puzzle_name = PuzzleVar.choice["base_name"] + str(PuzzleVar.choice["size"])
 	is_muted = false
 	
-        if NetworkManager.is_online:
-                # Connect to network signals
-                NetworkManager.player_joined.connect(_on_player_joined)
-                NetworkManager.player_left.connect(_on_player_left)
-                #back_button.pressed.connect(_on_back_pressed)
-                # Create online status label
-                create_floating_player_display()
-                for player_id in NetworkManager.connected_players.keys():
-                        var player_name = NetworkManager.connected_players[player_id]
-                        _on_player_joined(player_id, player_name)
+  if NetworkManager.is_online:
+        # Connect to network signals
+        NetworkManager.player_joined.connect(_on_player_joined)
+        NetworkManager.player_left.connect(_on_player_left)
+        #back_button.pressed.connect(_on_back_pressed)
+        # Create online status label
+        create_floating_player_display()
+        for player_id in NetworkManager.connected_players.keys():
+                var player_name = NetworkManager.connected_players[player_id]
+                _on_player_joined(player_id, player_name)
 	
 	# load up reference image
 	var ref_image = PuzzleVar.choice["file_path"]
@@ -65,6 +76,9 @@ func _ready():
 	
 	# create puzzle pieces and place in scene
 	PuzzleVar.load_and_or_add_puzzle_random_loc(self, sprite_scene, selected_puzzle_dir, true)
+
+	# create piece count display
+	create_piece_count_display()
 
 	if FireAuth.is_online and !NetworkManager.is_server:
 		# client is connected to firebase
@@ -145,6 +159,93 @@ func load_firebase_state(p_name):
 # UI CREATION AND MANAGEMENT
 #-----------------------------------------------------------------------------
 
+#var _digit_width := 40
+var _font_size := 80
+
+var _total_label: Label
+var _slash_label: Label
+var _cur_count_label: Label
+
+func create_piece_count_display():
+	var font = load("res://assets/fonts/Montserrat-Bold.ttf") as FontFile
+
+	# --- Total Piece Count label ---
+	_total_label = Label.new()
+	_total_label.name = "PieceCountTotal"
+	_total_label.add_theme_font_override("font", font)
+	_total_label.add_theme_font_size_override("font_size", _font_size)
+	_total_label.add_theme_color_override("font_color", Color("#c95b0c"))
+	_total_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+
+	_total_label.anchor_left = 1.0
+	_total_label.anchor_right = 1.0
+	_total_label.anchor_top = 0.0
+	_total_label.anchor_bottom = 0.0
+
+	_total_label.offset_top = 40
+	_total_label.offset_right = -20
+	_total_label.offset_left = _total_label.offset_right - 260
+	$UI_Button.add_child(_total_label)
+
+	# --- Slash label ---
+	_slash_label = Label.new()
+	_slash_label.name = "SlashLabel"
+	_slash_label.text = "/"
+	_slash_label.add_theme_font_override("font", font)
+	_slash_label.add_theme_font_size_override("font_size", _font_size)
+	_slash_label.add_theme_color_override("font_color", Color("#c95b0c"))
+	_slash_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+
+	_slash_label.anchor_left = 1.0
+	_slash_label.anchor_right = 1.0
+	_slash_label.anchor_top = 0.0
+	_slash_label.anchor_bottom = 0.0
+
+	_slash_label.offset_top = 40
+	_slash_label.offset_right = _total_label.offset_left - 5
+	_slash_label.offset_left = _slash_label.offset_right - 70
+	$UI_Button.add_child(_slash_label)
+
+	# --- Current Count label ---
+	_cur_count_label = Label.new()
+	_cur_count_label.name = "CurrentPieceCount"
+	_cur_count_label.add_theme_font_override("font", font)
+	_cur_count_label.add_theme_font_size_override("font_size", _font_size)
+	_cur_count_label.add_theme_color_override("font_color", Color("#c95b0c"))
+	_cur_count_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+
+	_cur_count_label.anchor_left = 1.0
+	_cur_count_label.anchor_right = 1.0
+	_cur_count_label.anchor_top = 0.0
+	_cur_count_label.anchor_bottom = 0.0
+
+	_cur_count_label.offset_top = 40
+	_cur_count_label.offset_right = _slash_label.offset_left - 5
+	_cur_count_label.offset_left = _cur_count_label.offset_right - 260
+	$UI_Button.add_child(_cur_count_label)
+
+	update_piece_count_display()
+
+
+func update_piece_count_display():
+	if not is_instance_valid(_cur_count_label):
+		return
+
+	var remaining = -1
+	for x in range(PuzzleVar.global_num_pieces):
+		if PuzzleVar.ordered_pieces_array[x].group_number == PuzzleVar.ordered_pieces_array[x].ID:
+			remaining += 1
+
+	if remaining == -1:
+		remaining = PuzzleVar.global_num_pieces
+
+	var completed = PuzzleVar.global_num_pieces - remaining
+
+	# No layout adjustments needed anymore
+	_cur_count_label.text = str(completed)
+	_total_label.text = str(PuzzleVar.global_num_pieces)
+
+
 func create_floating_player_display():
 	# Create PanelContainer (the floating box itself)
 	floating_status_box = PanelContainer.new()
@@ -171,12 +272,13 @@ func create_floating_player_display():
 
 	# Position the floating box (e.g., top-right)
 	floating_status_box.anchor_left = 1.0 # Anchor to the right
-	floating_status_box.anchor_top = 0.0  # Anchor to the top
+	floating_status_box.anchor_top = 1.0  # Anchor to the bottom
 	floating_status_box.anchor_right = 1.0
-	floating_status_box.anchor_bottom = 0.0
-	floating_status_box.offset_left = -270 # Offset from right edge (box width + margin)
-	floating_status_box.offset_top = 20     # Margin from top
+	floating_status_box.anchor_bottom = 1.0 # Anchor to the bottom
+	floating_status_box.offset_left = -320 # Offset from right edge (box width + margin)
+	floating_status_box.offset_top = -80     # Margin from bottom
 	floating_status_box.offset_right = -20  # Margin from right edge
+	floating_status_box.offset_bottom = -20  # Margin from bottom
 	# Let height be determined by content, or set offset_bottom for fixed height
 	floating_status_box.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	floating_status_box.grow_vertical = Control.GROW_DIRECTION_END
@@ -194,7 +296,7 @@ func create_floating_player_display():
 func _create_online_status_label_in_box(parent_node: PanelContainer): # Parent is now the PanelContainer
 	online_status_label = Label.new()
 	online_status_label.name = "OnlineStatusLabel"
-	online_status_label.add_theme_font_size_override("font_size", 18)
+	online_status_label.add_theme_font_size_override("font_size", 20)
 	online_status_label.add_theme_color_override("font_color", BOX_FONT_COLOR)
 	online_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD # Allow text to wrap if it's too long
 	
@@ -206,8 +308,148 @@ func _create_online_status_label_in_box(parent_node: PanelContainer): # Parent i
 	parent_node.add_child(online_status_label)
 	# update_online_status_label() will be called from _ready or when players change
 
+func create_chat_window():
+	chat_panel = PanelContainer.new()
+	chat_panel.name = "ChatWindow"
 
+	var style_box = StyleBoxFlat.new()
+	style_box.bg_color = BOX_BACKGROUND_COLOR
+	style_box.border_color = BOX_BORDER_COLOR
+	style_box.border_width_left = 2
+	style_box.border_width_top = 2
+	style_box.border_width_right = 2
+	style_box.border_width_bottom = 2
+	style_box.corner_radius_top_left = 6
+	style_box.corner_radius_top_right = 6
+	style_box.corner_radius_bottom_left = 6
+	style_box.corner_radius_bottom_right = 6
+	style_box.content_margin_left = 10
+	style_box.content_margin_top = 8
+	style_box.content_margin_right = 10
+	style_box.content_margin_bottom = 8
+	chat_panel.add_theme_stylebox_override("panel", style_box)
+
+	chat_panel.anchor_left = 1.0
+	chat_panel.anchor_top = 1.0
+	chat_panel.anchor_right = 1.0
+	chat_panel.anchor_bottom = 1.0
+	chat_panel.offset_left = -270
+	chat_panel.offset_right = -20
+	chat_panel.offset_top = -320
+	chat_panel.offset_bottom = chat_bottom_offset
+	chat_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	chat_panel.grow_vertical = Control.GROW_DIRECTION_END
+	chat_expanded_height = chat_panel.offset_bottom - chat_panel.offset_top
+	chat_panel.custom_minimum_size = Vector2(300, chat_expanded_height)
+
+	var ui_layer = $UI_Button
+	ui_layer.add_child(chat_panel)
+
+	var layout = VBoxContainer.new()
+	layout.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	layout.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	layout.custom_minimum_size = Vector2(0, 0)
+	layout.add_theme_constant_override("separation", 6)
+	chat_panel.add_child(layout)
+
+	var header_row = HBoxContainer.new()
+	header_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header_row.add_theme_constant_override("separation", 6)
+	layout.add_child(header_row)
+
+	var title_label = Label.new()
+	title_label.text = "Chat"
+	title_label.add_theme_font_size_override("font_size", 18)
+	title_label.add_theme_color_override("font_color", BOX_FONT_COLOR)
+	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header_row.add_child(title_label)
+
+	chat_toggle_button = Button.new()
+	chat_toggle_button.text = "Minimize"
+	chat_toggle_button.focus_mode = Control.FOCUS_NONE
+	chat_toggle_button.pressed.connect(_on_chat_toggle_button_pressed)
+	header_row.add_child(chat_toggle_button)
+
+	chat_content_container = VBoxContainer.new()
+	chat_content_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	chat_content_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	chat_content_container.add_theme_constant_override("separation", 6)
+	layout.add_child(chat_content_container)
+
+	chat_messages_label = RichTextLabel.new()
+	chat_messages_label.name = "ChatMessages"
+	chat_messages_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	chat_messages_label.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	chat_messages_label.custom_minimum_size = Vector2(0, 140)
+	chat_messages_label.scroll_active = true
+	chat_messages_label.scroll_following = true
+	chat_messages_label.bbcode_enabled = false
+	chat_messages_label.add_theme_color_override("default_color", BOX_FONT_COLOR)
+	chat_messages_label.text = ""
+	chat_content_container.add_child(chat_messages_label)
+
+	chat_input_row = HBoxContainer.new()
+	chat_input_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	chat_content_container.add_child(chat_input_row)
+
+	chat_input = LineEdit.new()
+	chat_input.name = "ChatInput"
+	chat_input.placeholder_text = "Type a message..."
+	chat_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	chat_input.text_submitted.connect(_on_chat_text_submitted)
+	chat_input_row.add_child(chat_input)
+
+	chat_send_button = Button.new()
+	chat_send_button.name = "ChatSendButton"
+	chat_send_button.text = "Send"
+	chat_send_button.pressed.connect(_on_chat_send_button_pressed)
+	chat_input_row.add_child(chat_send_button)
+
+func _on_chat_send_button_pressed():
+	if not is_instance_valid(chat_input):
+		return
+	var text := chat_input.text.strip_edges()
+	if text == "":
+		return
+	append_chat_message("You", text)
+	NetworkManager.send_chat_message(text)
+	chat_input.clear()
+
+func _on_chat_text_submitted(text: String):
+	chat_input.text = text
+	_on_chat_send_button_pressed()
+
+func append_chat_message(sender: String, message: String):
+	if not is_instance_valid(chat_messages_label):
+		return
+	chat_messages_label.append_text("[%s] %s\n" % [sender, message])
+	chat_messages_label.scroll_to_line(chat_messages_label.get_line_count())
+
+func _on_chat_toggle_button_pressed():
+	chat_minimized = !chat_minimized
+	if not is_instance_valid(chat_panel):
+		return
+
+	chat_content_container.visible = not chat_minimized
+	chat_toggle_button.text = "Expand" if chat_minimized else "Minimize"
+
+	var new_height := 48.0 if chat_minimized else chat_expanded_height
+	chat_panel.offset_top = chat_bottom_offset - new_height
+	chat_panel.custom_minimum_size = Vector2(chat_panel.custom_minimum_size.x, new_height)
+
+# Network event handlers
+func _on_player_joined(_client_id, client_name):
+	update_online_status_label()
+
+func _on_player_left(_client_id, client_name):
+	update_online_status_label()
+	
 func update_online_status_label(custom_text=""):
+	connected_players.clear()
+	for id in NetworkManager.connected_players.keys():
+		if id != multiplayer.get_unique_id():
+			connected_players.append(NetworkManager.connected_players[id])
+
 	if not is_instance_valid(online_status_label):
 		printerr("Online status label is not valid!") # Use printerr for errors
 		return
@@ -231,49 +473,23 @@ func update_online_status_label(custom_text=""):
 	online_status_label.text = status_text
 
 
-# Network event handlers
-func _on_player_joined(_client_id, client_name):
-	if not client_name in connected_players:
-		connected_players.append(client_name)
-	update_online_status_label()
-
-func _on_player_left(_client_id, client_name):
-	connected_players.erase(client_name)
-	update_online_status_label()
-
-## Create and update the online status label
-#func create_online_status_label():
-	#online_status_label = Label.new()
-	#online_status_label.text = "Online Mode"
-	#online_status_label.add_theme_font_size_override("font_size", 20)
-	#online_status_label.add_theme_color_override("font_color", Color(0, 1, 0))
-	#online_status_label.position = Vector2(20, 20)
-	#add_child(online_status_label)
-	#
-	#update_online_status_label()
-
-#func update_online_status_label(custom_text = ""):
-	#if not online_status_label:
-		#return
-		#
-	#if custom_text != "":
-		#online_status_label.text = custom_text
-		#return
-		#
-	#var player_count = connected_players.size() + 1  # +1 for self
-	#online_status_label.text = "Online Mode - " + str(player_count) + " player"
-	#if player_count != 1:
-		#online_status_label.text += "s"
-	#
-	#if connected_players.size() > 0:
-		#online_status_label.text += ": " + ", ".join(connected_players)
-
 # Called every frame. 'delta' is the elapsed time since the previous frame.
 func _process(_delta):
 	pass
 
 # Handle esc
 func _input(event):
+	var chat_has_focus := is_instance_valid(chat_input) and chat_input.has_focus()
+	if chat_has_focus and event is InputEventKey:
+		if event.is_pressed() and event.echo == false and event.keycode == KEY_ESCAPE:
+			get_tree().quit()
+		return
+
+	if is_instance_valid(chat_panel) and event is InputEventMouseButton and event.pressed:
+		var chat_rect := chat_panel.get_global_rect()
+		if chat_rect.has_point(event.position):
+			return
+
 	# Check if the event is a key press event
 	if event is InputEventKey and event.is_pressed() and event.echo == false:
 		# Check if the pressed key is the Escape key
@@ -382,7 +598,7 @@ func build_grid():
 	for x in range(PuzzleVar.global_num_pieces):
 		#compute the midpont of each piece
 		var node_bounding_box = PuzzleVar.global_coordinates_list[str(x)]
-		var midpoint = Vector2((node_bounding_box[2]+node_bounding_box[0])/2, (node_bounding_box[3]+node_bounding_box[1])/2)
+		var midpoint = Vector2((node_bounding_box[2] + node_bounding_box[0]) / 2, (node_bounding_box[3] + node_bounding_box[1]) / 2)
 		midpoints.append(midpoint) # append the midpoint of each piece
 
 	var row_join_counter = 1
@@ -507,14 +723,14 @@ func show_win_screen():
 	label.custom_minimum_size = get_viewport().size
 	
 	# Position label to correct location
-	label.position = Vector2(get_viewport().size) / 2 + Vector2(-1000, -700) 
+	label.position = Vector2(get_viewport().size) / 2 + Vector2(-1000, -700)
 
 	canvas_layer.add_child(label)
 	get_tree().current_scene.add_child(canvas_layer)
 	
 	#-------------------------BUTTON LOGIC-----------------------#
 	var button = $MainMenu
-	button.visible = false # we dont want this @TODO remove this 
+	button.visible = false # we dont want this @TODO remove this
 	# Change the font size
 	button.add_theme_font_override("font", font)
 	button.add_theme_font_size_override("font_size", 120)

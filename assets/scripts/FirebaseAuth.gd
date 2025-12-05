@@ -11,6 +11,7 @@ var user_id = ""
 var currentPuzzle = ""
 var is_online: bool = false
 var box_id: String
+var nickname: String
 
 const USER_COLLECTION: String = "sp_users"
 const USER_SUBCOLLECTIONS = ["active_puzzles", "completed_puzzles"]
@@ -59,23 +60,38 @@ var puzzleNames = {
 # called when the node enters the scene tree for the first time
 func _ready() -> void:
 	box_id = _parse_user_arg()
+	print("FirebaseAuth: Box ID set to ", box_id)
+	nickname = _parse_nickname()
+	print("FirebaseAuth: Nickname set to ", nickname)
 	Firebase.Auth.signup_succeeded.connect(_on_signup_succeeded)
 	Firebase.Auth.login_failed.connect(_on_login_failed)
 
 func _parse_user_arg() -> String:
-	var args: PackedStringArray = OS.get_cmdline_args()
-	for arg in args:
-		# two common styles: --user=Foo  or  --user Foo
-		if arg.begins_with("--user="):
-			return arg.get_slice("=", 1)
-	# fallback: look for --user and take the next arg as its value
-	var idx = args.find("--user")
-	if idx != -1 and idx + 1 < args.size():
-		return args[idx + 1]
-	print("Missing required --user argument")
-	#push_error("Missing required --user argument")
-	get_tree().quit(-1)
-	return ""
+	# check for saved username file
+	var file_path = "user://user_data.txt" # Use "user://" for user-specific data, or "res://" for project resources
+	var file = FileAccess.open(file_path, FileAccess.READ) # Open in read mode
+	if file != null and file.get_length() > 0:
+		var username := file.get_line().strip_edges()
+		file.close()
+		return username
+		
+	# if no saved file, set default username
+	return "default_user"
+
+func _parse_nickname() -> String:
+	# check for saved nickname file
+	var file_path = "user://user_data.txt" # Use "user://" for user-specific data, or "res://" for project resources
+	var file = FileAccess.open(file_path, FileAccess.READ) # Open in read mode
+	if file != null and file.get_length() > 0:
+		file.get_line() # skip first line
+		var username := file.get_line().strip_edges()
+		if username == "":
+			username = "default_nickname"
+		file.close()
+		return username
+		
+	# if no saved file, set default nickname
+	return "default_user"
 
 # attempt anonymous login
 func attempt_anonymous_login() -> void:
@@ -102,7 +118,7 @@ func handle_login() -> bool:
 		return true
 	# 2. Try loading from the auth file
 	print("FirebaseAuth: No active session, checking auth file...")
-	await check_auth_file() # Wait for the check to complete
+	await check_auth_file() # Wait for the check to completed
 	# Check again: Did loading the file log us in?
 	if not Firebase.Auth.needs_login():
 		print("FirebaseAuth: Login successful via auth file.")
@@ -128,12 +144,35 @@ func handle_login() -> bool:
 		is_online = false
 		return false
 
+# handle username login for lobby number
+func handle_username_login(username: String) -> bool:
+	print("FirebaseAuth: Handling username...")
+	var user = await get_user_doc(username)
+	return user != null
+	
+# get the users assigned lobby from firebase
+func get_user_lobby(username: String) -> void:
+	var user_lobbies: FirestoreCollection = Firebase.Firestore.collection(USER_COLLECTION)
+	var lobby = await user_lobbies.get_doc(username)
+	var num = (lobby.get_value("lobby"))
+	if num != null:
+		num = int(num)
+	if num:
+		PuzzleVar.lobby_number = num
+		print("ASSIGNED LOBBY_NUMBER: ", PuzzleVar.lobby_number)
+	else:
+		PuzzleVar.lobby_number = 0
+		print("No lobby assigned in firebase. Set lobby to 0")
+
 # get current user id
 func get_user_id() -> String:
 	return Firebase.Auth.get_user_id()
 
 func get_box_id() -> String:
 	return box_id
+
+func get_nickname() -> String:
+	return nickname
 
 #func get_box_id() -> String:
 	#var env = ConfigFile.new()
@@ -202,7 +241,6 @@ func parse_firestore_puzzle_data(raw_array: Dictionary) -> Array:
 # returns the collection "sp_users"
 func get_user_collection() -> FirestoreCollection:
 	return Firebase.Firestore.collection(USER_COLLECTION)
-
 
 # updates a specific user within "sp_users"
 func update_user(doc: FirestoreDocument) -> void:
@@ -433,7 +471,7 @@ func write_puzzle_state_server(lobby_num):
 	'''
 	if(NetworkManager.is_server):
 		return
-	var lobby_puzzle: FirestoreCollection = Firebase.Firestore.collection("sp_servers/lobbies/lobby1")
+	var lobby_puzzle: FirestoreCollection = Firebase.Firestore.collection("sp_servers/lobbies/lobby" + str(lobby_num))
 	var state = await lobby_puzzle.get_doc("state")
 	if not state:
 		print("ERROR: Server State Not Found in Lobby", lobby_num)

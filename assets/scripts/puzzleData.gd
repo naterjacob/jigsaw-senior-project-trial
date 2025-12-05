@@ -4,6 +4,9 @@ extends Node2D
 
 class_name PuzzleData
 
+const PuzzleManifestLoader := preload("res://assets/scripts/tools/puzzle_manifest_loader.gd")
+const PuzzleStorageProvider := preload("res://assets/scripts/tools/puzzle_storage_provider.gd")
+
 var open_first_time = true
 
 var row = 2
@@ -22,6 +25,9 @@ var path = "res://assets/puzzles/jigsawpuzzleimages" # path for the images
 var default_path = "res://assets/puzzles/jigsawpuzzleimages/dog.jpg"
 var images = [] # this will be loaded up in the new menu scene
 const PuzzleImageData = preload("res://puzzle_image_list.gd")
+
+var _manifest_loader: PuzzleManifestLoader
+var _storage_provider: PuzzleStorageProvider
 
 # these are the actual size of the puzzle piece, I am putting them in here so
 # that piece_2d can access them and use them for sizing upon instantiation
@@ -47,22 +53,29 @@ var background_clicked = false
 
 # New variables for online mode
 var is_online_mode = false
-var lobby_number = 1
+var lobby_number
+
+func _ready():
+        _manifest_loader = PuzzleManifestLoader.new()
+        add_child(_manifest_loader)
+        _manifest_loader.load_manifest_from_cache(PuzzleImageData.PUZZLE_DATA)
+        _storage_provider = PuzzleStorageProvider.new()
+        add_child(_storage_provider)
 
 func get_random_puzzles_w_size(size):
-	randomize() # initialize a random seed for the random number generator
-	# choose a random image from the list PuzzleVar.images
-	var local_puzzle_list = PuzzleVar.get_avail_puzzles()
-	var selected = local_puzzle_list[randi_range(0,local_puzzle_list.size()-1)]
+        randomize() # initialize a random seed for the random number generator
+        # choose a random image from the list PuzzleVar.images
+        var local_puzzle_list = PuzzleVar.get_avail_puzzles()
+        var selected = local_puzzle_list[randi_range(0,local_puzzle_list.size()-1)]
 	# choose a random size for the puzzle ranging from 2x2 to 10x10
 	selected["size"] = size
 	return selected
 
 func get_random_puzzles():
-	randomize() # initialize a random seed for the random number generator
-	# choose a random image from the list PuzzleVar.images
-	var local_puzzle_list = PuzzleVar.get_avail_puzzles()
-	var selected = local_puzzle_list[randi_range(0,local_puzzle_list.size()-1)]
+        randomize() # initialize a random seed for the random number generator
+        # choose a random image from the list PuzzleVar.images
+        var local_puzzle_list = PuzzleVar.get_avail_puzzles()
+        var selected = local_puzzle_list[randi_range(0,local_puzzle_list.size()-1)]
 	# choose a random size for the puzzle ranging from 2x2 to 10x10
 	var sizes = [10, 100, 1000]
 	var random_size = sizes[randi_range(0, 2)]
@@ -148,12 +161,32 @@ func load_and_or_add_puzzle_random_loc(parent_node: Node, sprite_scene: PackedSc
 			parent_node.call_deferred("add_child", piece)
 
 func get_avail_puzzles():
-	var ret_arr = []
-	for puzzle in PuzzleImageData.PUZZLE_DATA:
-		var size10 = puzzle.base_file_path + "_10"
-		var size100 = puzzle.base_file_path + "_100"
-		var size1000 = puzzle.base_file_path + "_1000"
-		if DirAccess.dir_exists_absolute(size10) and DirAccess.dir_exists_absolute(size100) and DirAccess.dir_exists_absolute(size1000):
-			ret_arr.append(puzzle.duplicate())
-	print(ret_arr)
-	return ret_arr
+        var manifest = _manifest_loader.get_manifest(PuzzleImageData.PUZZLE_DATA)
+        return manifest.duplicate(true)
+
+func refresh_puzzle_manifest() -> Array:
+        if _manifest_loader == null:
+                _manifest_loader = PuzzleManifestLoader.new()
+                add_child(_manifest_loader)
+        return await _manifest_loader.refresh_from_firestore(PuzzleImageData.PUZZLE_DATA)
+
+func cache_puzzle_choice(selection: Dictionary) -> Dictionary:
+        var updated := selection.duplicate(true)
+        if _storage_provider == null:
+                _storage_provider = PuzzleStorageProvider.new()
+                add_child(_storage_provider)
+        var size: int = updated.get("size", 0)
+        if size == 0:
+                var sizes: Array = updated.get("available_sizes", [])
+                if sizes.is_empty():
+                        size = 100
+                else:
+                        size = sizes[0]
+        var resolved_base := await _storage_provider.ensure_puzzle_cached(updated, size)
+        if resolved_base != "":
+                updated["base_file_path"] = resolved_base
+                var cached_image := resolved_base + ".jpg"
+                if FileAccess.file_exists(cached_image):
+                        updated["file_path"] = cached_image
+                        updated["thumbnail_storage_path"] = cached_image
+        return updated
