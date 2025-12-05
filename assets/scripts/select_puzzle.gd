@@ -24,6 +24,7 @@ var page_string = "%d out of %d"
 @onready var hbox = $"HBoxContainer"
 @onready var panel = $"Panel"
 @onready var thumbnail = $Panel/VBoxContainer/Thumbnail
+@onready var start_puzzle_button = $Panel/VBoxContainer/Start_Puzzle
 
 # grid reference:
 #have an array of images to pull from that will correspond to an integer returned by the buttons
@@ -33,30 +34,46 @@ var page_string = "%d out of %d"
 var list = []
 
 var local_puzzle_list = []
+var puzzle_variants := []
+
+func _build_puzzle_variants(puzzles: Array) -> Array:
+	var variants: Array = []
+	for puzzle in puzzles:
+		if !(puzzle is Dictionary):
+			continue
+		var sizes: Array = puzzle.get("available_sizes", [10, 100, 1000])
+		for size in sizes:
+			var entry: Dictionary = puzzle.duplicate(true)
+			entry["size"] = size
+			variants.append(entry)
+	return variants
+
+
 
 # Called when the node enters the scene tree for the first time.
 func _ready():
-	# this code will iterate through the children of the grid which are buttons
-	# and will link them so that they all carry out the same function
-	# that function being button_pressed
-	print("SELECT_PUZZLE")
-	# populate local_puzzle_list with puzzles and size
-	local_puzzle_list = PuzzleVar.get_avail_puzzles()
-	print(local_puzzle_list)
-	for i in grid.get_children():
-		var button := i as BaseButton
-		if is_instance_valid(button):
-			button.text = "" # set all buttons to have no text for formatting
-			# actual code connecting the button_pressed function to
-			# the buttons in the grid
-			button.pressed.connect(button_pressed.bind(button))
-	#
-	# this code gets the number of total pages
-	var num_buttons = grid.get_child_count()
-	#var imgsize = float(PuzzleVar.images.size())
-	var imgsize = local_puzzle_list.size() * 3.0 # assume each image in path will get 3 sizes (10, 100, 1000
+        # this code will iterate through the children of the grid which are buttons
+        # and will link them so that they all carry out the same function
+        # that function being button_pressed
+        print("SELECT_PUZZLE")
+        await PuzzleVar.refresh_puzzle_manifest()
+        # populate local_puzzle_list with puzzles and size
+        local_puzzle_list = PuzzleVar.get_avail_puzzles()
+        puzzle_variants = _build_puzzle_variants(local_puzzle_list)
+        print(local_puzzle_list)
+        for i in grid.get_children():
+                var button := i as BaseButton
+                if is_instance_valid(button):
+                        button.text = "" # set all buttons to have no text for formatting
+                        # actual code connecting the button_pressed function to
+                        # the buttons in the grid
+                        button.pressed.connect(button_pressed.bind(button))
+        #
+        # this code gets the number of total pages
+        var num_buttons = grid.get_child_count()
+	var imgsize = float(puzzle_variants.size())
 	var nb = float(num_buttons)
-	total_pages = ceil(imgsize/nb) # round up always to get total_pages
+	total_pages = max(1, ceil(imgsize/nb)) # round up always to get total_pages
 	# disable the buttons logic that controls switching pages depending on
 	# how many pages there are
 	left_button.disabled = true 
@@ -115,87 +132,54 @@ func _on_right_button_pressed():
 func button_pressed(button):
 	#need to take val into account
 	#do stuff to pick image
-	
+
 	#$AudioStreamPlayer.play() #this doesn't currently work because it switches scenes too quickly
-	# index is initially set as the page number subtracted by 1 and then
-	# multiplied by the number of buttons which is 9
-	# ex:
-	#	if you select something from page 2, you will currently
-	#	have an index of 9
-	var index = (page_num-1) * grid.get_child_count()
-	# how this works is by taking the name of the button and taking the
-	# number from the last character as per naming convention: gridx
-	# ex:
-	#	if you select the image in the button that is labeled grid1 then it
-	#	takes the 1 at the end and adds it to the index to get the actual index
-	#	of the image as it would be in the list PuzzleVar.images
-	
-	# ex for total thing:
-	#	if you select an image on page 2 and pick grid1, then the actual index
-	#	of the image is 10 and that will be put into PuzzleVar.choice so that
-	#	the appropriate image can be loaded in
-	
-	var button_name = String(button.name)
-	var chosen = index + int(button_name[-1])
-	var row_selected = ceil((chosen % 9)/ 3)
-	var sizes = [10, 100, 1000]
-	var size_selected = sizes[chosen % 3]
-			
-	#print(row_selected, " from page ", page_num)
-	# now we need to select the row corresponding to the page num
-	var start_image = (page_num - 1) * 3
-	var end_image = min(local_puzzle_list.size() * 3, start_image + 3)
-	var puzzles_on_page = local_puzzle_list.slice(start_image, end_image)
-	if !(row_selected < puzzles_on_page.size()):
+	var chosen = button.get_meta("puzzle_index", -1)
+	if chosen == -1:
+		# fall back to original math when metadata is missing
+		var index = (page_num-1) * grid.get_child_count()
+		var button_name = String(button.name)
+		chosen = index + int(button_name[-1])
+
+	if chosen < 0 or chosen >= puzzle_variants.size():
 		return
-	#print(puzzles_on_page[row_selected]["base_name"])
-	# if the selection is valid, proceed to the puzzle size selection menu
-	puzzles_on_page[row_selected]["size"] = size_selected
-	PuzzleVar.choice = puzzles_on_page[row_selected]
-	
+
+	var selection: Dictionary = puzzle_variants[chosen].duplicate(true)
+	PuzzleVar.choice = selection
+
 	# Show Continue panel
 	hbox.hide()
 	pageind.hide()
-	thumbnail.texture = load(puzzles_on_page[row_selected]["file_path"])
-	size_label.text = str(size_selected)
+	var thumb_path = selection.get("thumbnail_storage_path", selection.get("file_path", ""))
+	thumbnail.texture = load(thumb_path)
+	size_label.text = str(selection.get("size", ""))
 	panel.show()
-	
+
 
 func populate_grid_2():
-	var buttons = grid.get_children()
-	var columns = grid.columns
-	var rows = buttons.size() / columns
-	var base_index = (page_num - 1) * rows
+        var buttons = grid.get_children()
+        var columns = grid.columns
+        var base_index = (page_num - 1) * buttons.size()
 
-	for row in range(rows):
-		var img_index = base_index + row
-		if img_index >= local_puzzle_list.size():
-			# Clear all buttons in this row
-			for col in range(columns):
-				var button = buttons[row * columns + col]
-				var tex_node = button.get_child(0)
-				if tex_node and tex_node is TextureRect:
-					tex_node.texture = null
-			continue
+        for i in range(buttons.size()):
+                var global_index = base_index + i
+                var button = buttons[i]
+                var tex_node = button.get_child(0)
+                if not is_instance_valid(button) or tex_node == null:
+                        continue
+                button.set_meta("puzzle_index", -1)
+                if global_index >= puzzle_variants.size():
+                        tex_node.texture = null
+                        continue
 
-		var file_path = local_puzzle_list[img_index]["file_path"]
-		var res = load(file_path)
-
-		for col in range(columns):
-			var button = buttons[row * columns + col]
-			if is_instance_valid(button):
-				var tex_node = button.get_child(0)
-				if tex_node and tex_node is TextureRect:
-					tex_node.texture = res
-					tex_node.size = button.size
-
-				## Optional: show different progress info per size
-				#if FireAuth.offlineMode == 0:
-					#var global_index = img_index * columns + col
-					#print(GlobalProgress.progress_arr)
-					#add_custom_label(button, GlobalProgress.progress_arr[global_index])
-				#else:
-					#add_custom_label(button, 0)
+                var puzzle_data: Dictionary = puzzle_variants[global_index]
+                var thumb_path = puzzle_data.get("thumbnail_storage_path", "")
+                var res = load(thumb_path)
+                if res == null:
+                        res = load(puzzle_data.get("file_path", ""))
+                tex_node.texture = res
+                tex_node.size = button.size
+                button.set_meta("puzzle_index", global_index)
 
 			
 			
@@ -275,7 +259,10 @@ func add_custom_label(button, percentage):
 
 
 func _on_start_puzzle_pressed() -> void:
-	get_tree().change_scene_to_file("res://assets/scenes/jigsaw_puzzle_1.tscn")
+        start_puzzle_button.disabled = true
+        var cached_choice := await PuzzleVar.cache_puzzle_choice(PuzzleVar.choice)
+        PuzzleVar.choice = cached_choice
+        get_tree().change_scene_to_file("res://assets/scenes/jigsaw_puzzle_1.tscn")
 
 
 func _on_go_back_pressed() -> void:
